@@ -1,22 +1,72 @@
 import time
 import asyncio
 import PyQt5
-from PyQt5.QtCore import QObject, pyqtSignal, QThread, QByteArray
+from PyQt5.QtCore import QObject, pyqtSignal, QThread, QByteArray, QTimer
 from PyQt5.QtGui import QIcon, QFont, QMovie
 from PyQt5.QtWidgets import QApplication, QWidget, QTextEdit, QVBoxLayout, QPushButton, QLayout, QBoxLayout, \
-    QGridLayout, QLabel, QProgressBar
+    QGridLayout, QLabel, QProgressBar, QLineEdit, QSizePolicy
 from PyQt5 import QtCore
 import sys
-from pynput import mouse
-import json
 import threading, socket
-
 import logging
-
+import pyautogui as pat
+import pyperclip
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
+class CommandSet:
+    def __init__(self):
+        # 명령어 입력 부분 (계산기 sample
+        self._list = list()
+
+        self._list.insert(0, Command("move", [83, 343]))
+        self._list.insert(0, Command("lc"))
+        self._list.insert(0, Command("move", [123, 491]))
+        self._list.insert(0, Command("lc"))
+        self._list.insert(0, Command("pause"))
+
+class Command:
+    def __init__(self, command_type="m", command_data=["0,0"]):
+        # m : mouse command, h : keyboard commnad, k : keyboard typing, lc : click
+        self._type = command_type
+        self._data = command_data
+
+    def work(self):
+        if self._type == "move":
+            _pos = np.array([self._data[0], self._data[1]])
+            print("- mouse input -")
+            print(_pos)
+            pat.moveTo(_pos[0], _pos[1])
+            return False
+        elif self._type == "lc":
+            pat.leftClick()
+            return False
+        elif self._type == "k":
+            pyperclip.copy(self._data[0])
+            pat.hotkey("ctrl", "v")
+            return False
+        elif self._type == "h":
+            if len(self._data) == 1:
+                pat.hotkey(self._data[0])
+            if len(self._data) == 2:
+                pat.hotkey(self._data[0], self._data[1])
+            if len(self._data) == 3:
+                pat.hotkey(self._data[0], self._data[1], self._data[2])
+            return False
+        elif self._type == "pause":
+            return True
+        elif self._type == "reset":
+            commands = CommandSet()
+
+
+
 class MacroServer(QWidget):
+    commands = CommandSet()
+    activated_socket = None
+    interval_time = 30
+    acc_time = 0
+    isTimerRunning = False
 
     class Worker(QObject):
         finished = pyqtSignal()
@@ -32,7 +82,7 @@ class MacroServer(QWidget):
         # 녹화 리스너
         self.setStyleSheet("background-color: #292929;")
         self.setWindowTitle("MacroServer")
-        self.resize(1280, 840)
+        self.resize(640, 320)
 
         # self.state_ = QLabel("상태")
         # self.state_.setAlignment(QtCore.Qt.AlignCenter)
@@ -44,22 +94,37 @@ class MacroServer(QWidget):
         self.state_msg.setAlignment(QtCore.Qt.AlignCenter)
         self.state_msg.setStyleSheet('QLabel { color : white;}')
 
+        self.time_interval_text = QLineEdit("30")
+        self.time_interval_text.setStyleSheet('QLineEdit { color : white;}')
+        self.time_interval_text.setAlignment(QtCore.Qt.AlignCenter)
         #label
-        self.loading_label = QLabel()
-        self.loading_label.setAlignment(QtCore.Qt.AlignCenter)
-        self.loading_label.setGeometry(QtCore.QRect(25, 25, 200, 200))
-        self.loading_label.setMinimumSize(QtCore.QSize(200, 200))
-        self.loading_label.setMaximumSize(QtCore.QSize(200, 200))
+        self.loading_label = QLabel(alignment = QtCore.Qt.AlignCenter)
+
+        self.loading_label.setGeometry(QtCore.QRect(50, 50, 50, 50))
+        self.loading_label.setMinimumSize(QtCore.QSize(50, 50))
+        self.loading_label.setMaximumSize(QtCore.QSize(150, 150))
+
+        self.timer_label = QLabel("0")
+        self.timer_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.timer_label.setStyleSheet('QLabel { color : white;}')
 
         # Loading the GIF
-        self.movie = QMovie("./imgs/loading2.gif",QByteArray(),self)
+        self.movie = QMovie("loading4.gif", QByteArray(), self)
         self.movie.setCacheMode(QMovie.CacheAll)
         self.loading_label.setMovie(self.movie)
+        self.loading_label.setAlignment(QtCore.Qt.AlignCenter)
 
         self.btn_conn = QPushButton("Try Connect")
         self.btn_conn.resize(300,300)
-        self.btn_conn.setIcon(QIcon('./imgs/try_conn_btn.png'))
-        self.btn_conn.setStyleSheet('QPushButton::hover' '{' 'background-color : #64b5f6' '}' 'QPushButton {color: white;}')
+        self.btn_conn.setIcon(QIcon('try_conn_btn.png'))
+        self.btn_conn.setStyleSheet('QPushButton::hover' '{' 'background-color : #64b5f6' '}' 'QPushButton {background-color:#FF9800; color: white;}')
+
+        self.btn_startMacro = QPushButton("Start Macro")
+        self.btn_startMacro.setStyleSheet('QPushButton::hover' '{' 'background-color : #64b5f6' '}' 'QPushButton {background-color:#FF9800; color: white;}')
+
+        self.timer = QTimer(self)
+        self.timer.setInterval(1000)
+        self.timer.timeout.connect(self.timer_update)
 
         layout = QGridLayout()
         layout.setRowStretch(0, 1)
@@ -69,29 +134,58 @@ class MacroServer(QWidget):
         layout.setRowStretch(4, 1)
         layout.setRowStretch(5, 1)
         layout.setRowStretch(6, 1)
+        layout.setRowStretch(7, 1)
 
         layout.setColumnStretch(0, 1)
         layout.setColumnStretch(1, 1)
         layout.setColumnStretch(2, 1)
         layout.setColumnStretch(3, 1)
         layout.setColumnStretch(4, 1)
+        
 
         layout.addWidget(self.loading_label, 0, 2)
         # layout.addWidget(self.state_, 1, 2)
         layout.addWidget(self.state_msg, 2, 2)
         layout.addWidget(self.btn_conn, 3, 2)
+        layout.addWidget(self.btn_startMacro, 4, 2)
+        layout.addWidget(self.timer_label, 5, 2)
+        layout.addWidget(self.time_interval_text,6,2)
 
         self.setLayout(layout)
 
         self.btn_conn.clicked.connect(self.btn_conn_Clicked)
+        self.btn_startMacro.clicked.connect(self.btn_Macro_On_Off_Clicked)
+
+    def timer_update(self):
+        self.acc_time += 1
+        self.timer_label.setText(str(self.interval_time - self.acc_time))
+        if self.interval_time <= self.acc_time:
+            #일할 시간이다 Client야.
+            send_to_client_execute_command()
+            self.acc_time = 0
 
     def btn_conn_Clicked(self):
+        self.interval_time = int(self.time_interval_text.text())
         if self.btn_conn.text() == "Stop Connecting":
             #연결 중단하기
             self.stopLoadingAnimation(False)
         else:
             self.startLoadingAnimation()
             self.startListen()
+
+    def btn_Macro_On_Off_Clicked(self):
+        if self.isTimerRunning == False:
+            self.isTimerRunning = True
+            self.timer.start()
+            send_to_client_execute_command()
+            self.btn_startMacro.setText("Stop Macro")
+            self.btn_startMacro.setStyleSheet('QPushButton::hover' '{' 'background-color : #64b5f6' '}' 'QPushButton {background-color:#64b5f6; color: white;}')
+        else:
+            self.isTimerRunning = False
+            self.timer.stop()
+            self.btn_startMacro.setText("Start Macro")
+            self.time_interval_text.setText("0")
+            self.btn_startMacro.setStyleSheet('QPushButton::hover' '{' 'background-color : #64b5f6' '}' 'QPushButton {background-color:#FF9800; color: white;}')
 
     def btnPress2_Clicked(self):
         self.listener.stop()
@@ -167,7 +261,7 @@ class MacroServer(QWidget):
         self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         # 서버는 복수 ip를 사용하는 pc의 경우는 ip를 지정하고 그렇지 않으면 None이 아닌 ''로 설정한다.
         # 포트는 pc내에서 비어있는 포트를 사용한다. cmd에서 netstat -an | find "LISTEN"으로 확인할 수 있다.
-        self.server_socket.bind(('161.122.112.178', 9999))
+        self.server_socket.bind(('192.168.0.1', 9999))
         # server 설정이 완료되면 listen를 시작한다.
         self.server_socket.listen()
         try:
@@ -189,6 +283,10 @@ class MacroServer(QWidget):
         self.client_socket.close()
         print("연결 종료")
 
+
+
+def send_to_client_execute_command():
+    MacroServer.activated_socket.send('client on'.encode())
 
 def connectionCheck(cs):
     try:
@@ -222,37 +320,78 @@ def is_socket_closed(sock: socket.socket) -> bool:
         return False
     return False
 
+
+
+
+
 #Connection 되었을 때 Routine
 def binder(client_socket, addr):
     # 커넥션이 되면 접속 주소가 나온다.
+
     print('Connected by', addr)
     win.stopLoadingAnimation(True)
-    client_socket.send('pong'.encode())
+
+
+    client_socket.settimeout(None)
+    MacroServer.activated_socket = client_socket
+
+
+    #client_socket.send('pong'.encode())
+
+    #client에게 명령 하면서 시작
+#    client_socket.send('client on'.encode())
 
     while True:
-
         try:
+
+            # receive 시작
             rdata = client_socket.recv(256)
-            print("receive : ", rdata.decode('utf8'), '\n')
+            #print("receive : ", rdata.decode('utf8'), '\n')
+
+            if rdata.decode('utf8') == "server on":
+                print("server 시작")
+                while True:
+                    time.sleep(1)
+                    if len(MacroServer.commands._list) <= 0:
+                        print("명령어가 없네요")
+                        MacroServer.commands = CommandSet()
+                        break
+                    c = MacroServer.commands._list.pop()
+
+                    # Command Set에 따라 일하기
+                    isBreak = c.work()
+
+                    # command set에 pause 명령어 들어온 경우
+                    if isBreak:
+                        client_socket.send('client on'.encode())
+                        if len(MacroServer.commands._list) <= 0:
+                            MacroServer.commands = CommandSet()
+                        break
+
+            if rdata.decode('utf8') == "server off":
+                MacroServer.commands = CommandSet()
+
+            if is_socket_closed(client_socket):
+                print("Client 응답 없음")
+                win.stopLoadingAnimation(False)
+                break
+            else:
+                pass  # print("연결 정상")
+
+            if win.isConnected is False:
+                break
 
         except BlockingIOError as block_error:
-            print("들어온 데이터가 없음")
-
-
-        if is_socket_closed(client_socket):
-            print("Client 응답 없음")
+            pass
+        except OSError as os_error:
             win.stopLoadingAnimation(False)
-            break
-        else:
-            pass # print("연결 정상")
-
-        if win.isConnected is False:
             break
 
         time.sleep(2)
 
 if __name__ == '__main__':
-        app = QApplication(sys.argv)
-        win = MacroServer()
-        win.show()
-        sys.exit(app.exec_())
+#    commands = CommandSet()
+    app = QApplication(sys.argv)
+    win = MacroServer()
+    win.show()
+    sys.exit(app.exec_())

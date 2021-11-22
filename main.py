@@ -16,11 +16,14 @@ class Command:
             print("- mouse input -")
             print(_pos)
             pat.moveTo(_pos[0],_pos[1])
+            return True
         elif self._type == "lc":
             pat.leftClick()
+            return True
         elif self._type == "k":
             pyperclip.copy(self._data[0])
             pat.hotkey("ctrl", "v")
+            return True
         elif self._type == "h":
             if len(self._data) == 1:
                 pat.hotkey(self._data[0])
@@ -28,6 +31,10 @@ class Command:
                 pat.hotkey(self._data[0],self._data[1])
             if len(self._data) == 3:
                 pat.hotkey(self._data[0],self._data[1],self._data[2])
+            return True
+        elif self._type == "turn":
+            return False
+
 
 
 
@@ -65,6 +72,7 @@ if __name__ == '__main__':
             break
 
         c = commands._list.pop()
-        c.work()
+        isContinue = c.work()
+
 
 #1. connection
