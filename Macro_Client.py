@@ -40,7 +40,7 @@ class Command:
             print("- mouse input -")
             print(_pos)
             pat.moveTo(_pos[0], _pos[1])
-            time.sleep(self.delay_time)
+            time.sleep(self._delay_time)
             return False
         elif self._type == "lc":
             pat.leftClick()
@@ -260,6 +260,7 @@ def is_socket_closed(sock: socket.socket) -> bool:
         return True
     except Exception as e:
         print("exception")
+        win.showMaximized()
         #logger.exception("unexpected exception when checking if a socket is closed")
         return False
     return False
@@ -277,14 +278,26 @@ def binder(client_socket):
             #receive 시작
             rdata = client_socket.recv(256)
             #print("receive : ", rdata.decode('utf8'), '\n')
-
+            
+             # Macro Stop 체크하여 중지 가능하도록
+            if rdata.decode('utf8') == "client off":
+                print("매크로 작업 스탑! ( C )")
+                MacroClient.commands = CommandSet()
+                win.showNormal()
+                print(rdata.decode('utf8'))
+                time.sleep(1)
+                continue
+            
+            
             if rdata.decode('utf8') == "client on":
+                win.showMinimized()
                 print("client 시작")
                 while True:
                     time.sleep(1)
                     if len(MacroClient.commands._list) <= 0:
                         MacroClient.commands = CommandSet()
                         client_socket.send('client off'.encode())
+                        print("Client 루틴 종료")
                         break
                     c = MacroClient.commands._list.pop()
 
@@ -293,18 +306,22 @@ def binder(client_socket):
 
                     # command set에 pause 명령어 들어온 경우
                     if isBreak:
+                        print("명령 권한 변경 client -> Server")
                         client_socket.send('server on'.encode())
                         break
 
 
+
             if is_socket_closed(client_socket):
                 print("Client 응답 없음")
+                win.showNormal()
                 win.stopLoadingAnimation(False)
                 break
             else:
                 pass  # print("연결 정상")
 
             if win.isConnected is False:
+                win.showNormal()
                 break
 
 
@@ -312,12 +329,14 @@ def binder(client_socket):
             pass
         except ConnectionAbortedError as conn_error:
             win.stopLoadingAnimation(False)
-            break;
+            break
         except ConnectionResetError as conn_error:
             win.stopLoadingAnimation(False)
-            break;
-
+            break
+            
         time.sleep(2)
+
+            
 
 
 
