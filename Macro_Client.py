@@ -1,7 +1,7 @@
 import time
 from PyQt5.QtCore import QObject, pyqtSignal, QThread, QByteArray
 from PyQt5.QtGui import QIcon, QFont, QMovie
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QPushButton, QLayout, QBoxLayout, \
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QPushButton, QLayout, QBoxLayout, QAction, \
     QGridLayout, QLabel, QProgressBar, QLineEdit
 from PyQt5 import QtCore
 import sys
@@ -10,7 +10,9 @@ import pyautogui as pat
 import pyperclip
 import numpy as np
 
+global serverIP
 serverIP = "192.168.0.1"
+global serverPort
 serverPort = "9999"
 
 class CommandSet:
@@ -158,6 +160,9 @@ class MacroClient(QWidget):
 
         self.btn_conn.clicked.connect(self.on_try_connection_click)
 
+        self.quit = QAction("quit", self)
+        self.quit.triggered.connect(self.closeEvent)
+
 
 
     def on_try_connection_click(self):
@@ -237,6 +242,10 @@ class MacroClient(QWidget):
         except ConnectionRefusedError as e:
             win.stopLoadingAnimation(False)
             print(e)
+
+    def closeEvent(self, event):
+        print("call exit")
+        SaveData()
 
 
 def is_socket_closed(sock: socket.socket) -> bool:
@@ -320,10 +329,46 @@ def binder(client_socket):
         time.sleep(2)
 
 
+def SaveData():
+    import os
+    import shelve
+    path = os.path.expanduser('~/RPA_Data_Client')
+    db = shelve.open(path)
+
+    #저장할 datas
+    db['ip'] = win.ip_edit_text.text()
+    db['port'] = win.port_edit_text.text()
+    print("saved")
+
+    #del db['test']
+    db.close()
+
+
+def LoadData():
+    import os
+    import shelve
+
+    path = os.path.expanduser('~/RPA_Data_Client')
+    db = shelve.open(path)
+
+    try:
+        # 불러올 datas
+        win.ip_edit_text.setText(db['ip'])
+        serverIP = db['ip']
+        win.port_edit_text.setText(db['port'])
+        serverPort = db['port']
+    except Exception:
+        pass
+
+    db.close()
+
 
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
     win = MacroClient()
+    LoadData()
     win.show()
     sys.exit(app.exec_())
+
+

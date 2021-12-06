@@ -3,7 +3,7 @@ import asyncio
 import PyQt5
 from PyQt5.QtCore import QObject, pyqtSignal, QThread, QByteArray, QTimer
 from PyQt5.QtGui import QIcon, QFont, QMovie
-from PyQt5.QtWidgets import QApplication, QWidget, QTextEdit, QVBoxLayout, QPushButton, QLayout, QBoxLayout, \
+from PyQt5.QtWidgets import QApplication, QWidget, QTextEdit, QVBoxLayout, QPushButton, QLayout, QBoxLayout,QAction, \
     QGridLayout, QLabel, QProgressBar, QLineEdit, QSizePolicy
 from PyQt5 import QtCore
 import sys
@@ -14,6 +14,11 @@ import pyperclip
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+global serverIP
+serverIP = "192.168.0.1"
+global serverPort
+serverPort = "9999"
 
 class CommandSet:
     def __init__(self):
@@ -119,6 +124,12 @@ class MacroServer(QWidget):
         self.btn_conn.setIcon(QIcon('try_conn_btn.png'))
         self.btn_conn.setStyleSheet('QPushButton::hover' '{' 'background-color : #64b5f6' '}' 'QPushButton {background-color:#FF9800; color: white;}')
 
+        self.ip_edit_text = QLineEdit(serverIP)
+        self.port_edit_text = QLineEdit(serverPort)
+        self.port_edit_text.setStyleSheet('QLineEdit { color : white;}')
+        self.ip_edit_text.setAlignment(QtCore.Qt.AlignCenter)
+        self.ip_edit_text.setStyleSheet('QLineEdit { color : white;}')
+
         self.btn_startMacro = QPushButton("Start Macro")
         self.btn_startMacro.setStyleSheet('QPushButton::hover' '{' 'background-color : #64b5f6' '}' 'QPushButton {background-color:#FF9800; color: white;}')
 
@@ -146,13 +157,20 @@ class MacroServer(QWidget):
         layout.addWidget(self.loading_label, 0, 2)
         # layout.addWidget(self.state_, 1, 2)
         layout.addWidget(self.state_msg, 2, 2)
-        layout.addWidget(self.btn_conn, 3, 2)
+
+        layout.addWidget(self.btn_conn, 3, 1)
+        layout.addWidget(self.ip_edit_text, 3, 2)
+        layout.addWidget(self.port_edit_text, 3, 3)
+
         layout.addWidget(self.btn_startMacro, 4, 2)
         layout.addWidget(self.timer_label, 5, 2)
         layout.addWidget(self.time_interval_text,6,2)
 
         self.setLayout(layout)
 
+
+        self.quit = QAction("quit", self)
+        self.quit.triggered.connect(self.closeEvent)
         self.btn_conn.clicked.connect(self.btn_conn_Clicked)
         self.btn_startMacro.clicked.connect(self.btn_Macro_On_Off_Clicked)
 
@@ -261,7 +279,7 @@ class MacroServer(QWidget):
         self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         # 서버는 복수 ip를 사용하는 pc의 경우는 ip를 지정하고 그렇지 않으면 None이 아닌 ''로 설정한다.
         # 포트는 pc내에서 비어있는 포트를 사용한다. cmd에서 netstat -an | find "LISTEN"으로 확인할 수 있다.
-        self.server_socket.bind(('192.168.0.1', 9999))
+        self.server_socket.bind((serverIP, serverPort))
         # server 설정이 완료되면 listen를 시작한다.
         self.server_socket.listen()
         try:
@@ -282,6 +300,10 @@ class MacroServer(QWidget):
         self.server_socket.close()
         self.client_socket.close()
         print("연결 종료")
+
+    def closeEvent(self, event):
+        print("call exit")
+        SaveData()
 
 
 
@@ -389,9 +411,42 @@ def binder(client_socket, addr):
 
         time.sleep(2)
 
+def SaveData():
+    import os
+    import shelve
+    path = os.path.expanduser('~/RPA_Data_Server')
+    db = shelve.open(path)
+
+    # 저장할 datas
+    db['ip'] = win.ip_edit_text.text()
+    db['port'] = win.port_edit_text.text()
+    print("saved")
+
+    # del db['test']
+    db.close()
+
+def LoadData():
+    import os
+    import shelve
+
+    path = os.path.expanduser('~/RPA_Data_Server')
+    db = shelve.open(path)
+
+    try:
+        # 불러올 datas
+        win.ip_edit_text.setText(db['ip'])
+        serverIP = db['ip']
+        win.port_edit_text.setText(db['port'])
+        serverPort = db['port']
+    except Exception:
+        pass
+
+    db.close()
+
 if __name__ == '__main__':
 #    commands = CommandSet()
     app = QApplication(sys.argv)
     win = MacroServer()
+    LoadData()
     win.show()
     sys.exit(app.exec_())
