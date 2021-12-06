@@ -1,7 +1,8 @@
 import time
 import asyncio
+import keyboard
 import PyQt5
-from PyQt5.QtCore import QObject, pyqtSignal, QThread, QByteArray, QTimer
+from PyQt5.QtCore import QObject, pyqtSignal, QThread, QByteArray, QTimer, pyqtSignal
 from PyQt5.QtGui import QIcon, QFont, QMovie
 from PyQt5.QtWidgets import QApplication, QWidget, QTextEdit, QVBoxLayout, QPushButton, QLayout, QBoxLayout,QAction, \
     QGridLayout, QLabel, QProgressBar, QLineEdit, QSizePolicy
@@ -19,6 +20,12 @@ global serverIP
 serverIP = "192.168.0.1"
 global serverPort
 serverPort = "9999"
+
+class GlobalHotkeyManager(QObject):
+    StopSignal = pyqtSignal()
+    
+    def start(self):
+        keyboard.add_hotkey('ctrl+f1', self.StopSignal.emit)
 
 class CommandSet:
     def __init__(self):
@@ -69,7 +76,6 @@ class Command:
 class MacroServer(QWidget):
     commands = CommandSet()
     activated_socket = None
-    interval_time = 30
     acc_time = 0
     isTimerRunning = False
 
@@ -83,6 +89,10 @@ class MacroServer(QWidget):
         super().__init__(parent)
 
         self.isConnected = False
+        
+        self.acc_time = 0
+        self.routine_time = 30 # default time 30 seconds
+        self.delay_time = 0
 
         # 녹화 리스너
         self.setStyleSheet("background-color: #292929;")
@@ -173,17 +183,22 @@ class MacroServer(QWidget):
         self.quit.triggered.connect(self.closeEvent)
         self.btn_conn.clicked.connect(self.btn_conn_Clicked)
         self.btn_startMacro.clicked.connect(self.btn_Macro_On_Off_Clicked)
+        
+        hotkeyManager = GlobalHotkeyManager(self)
+        hotkeyManager.StopSignal.connect(self.btn_Macro_On_Off_Clicked)
+        hotkeyManager.start()
 
     def timer_update(self):
         self.acc_time += 1
-        self.timer_label.setText(str(self.interval_time - self.acc_time))
-        if self.interval_time <= self.acc_time:
+        self.timer_label.setText(str(self.routine_time - self.acc_time))
+        if self.routine_time <= self.acc_time:
             #일할 시간이다 Client야.
             send_to_client_execute_command()
             self.acc_time = 0
 
+        # Server - Client Binding 연결.. (hand shaking)
     def btn_conn_Clicked(self):
-        self.interval_time = int(self.time_interval_text.text())
+        self.routine_time = int(self.time_interval_text.text())
         if self.btn_conn.text() == "Stop Connecting":
             #연결 중단하기
             self.stopLoadingAnimation(False)
@@ -193,17 +208,21 @@ class MacroServer(QWidget):
 
     def btn_Macro_On_Off_Clicked(self):
         if self.isTimerRunning == False:
+            # 매크로 실행
             self.isTimerRunning = True
             self.timer.start()
             send_to_client_execute_command()
             self.btn_startMacro.setText("Stop Macro")
-            self.btn_startMacro.setStyleSheet('QPushButton::hover' '{' 'background-color : #64b5f6' '}' 'QPushButton {background-color:#64b5f6; color: white;}')
+            self.btn_startMacro.setStyleSheet('QPushButton::hover' '{' 'background-color : #64b5f6' '}' 'QPushButton {background-color:#64b5f6; color: white;}')            
+            self.showMinimized()
         else:
+            # 매크로 중지
             self.isTimerRunning = False
             self.timer.stop()
             self.btn_startMacro.setText("Start Macro")
             self.time_interval_text.setText("0")
             self.btn_startMacro.setStyleSheet('QPushButton::hover' '{' 'background-color : #64b5f6' '}' 'QPushButton {background-color:#FF9800; color: white;}')
+            self.showNormal()
 
     def btnPress2_Clicked(self):
         self.listener.stop()
@@ -279,7 +298,11 @@ class MacroServer(QWidget):
         self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         # 서버는 복수 ip를 사용하는 pc의 경우는 ip를 지정하고 그렇지 않으면 None이 아닌 ''로 설정한다.
         # 포트는 pc내에서 비어있는 포트를 사용한다. cmd에서 netstat -an | find "LISTEN"으로 확인할 수 있다.
+<<<<<<< HEAD
         self.server_socket.bind((serverIP, serverPort))
+=======
+        self.server_socket.bind(('127.0.0.1', 9999))
+>>>>>>> e3eccc4acc7c6786ac5f5b32f82984f71abccbca
         # server 설정이 완료되면 listen를 시작한다.
         self.server_socket.listen()
         try:
@@ -348,6 +371,7 @@ def is_socket_closed(sock: socket.socket) -> bool:
 
 #Connection 되었을 때 Routine
 def binder(client_socket, addr):
+    is_client_running = False
     # 커넥션이 되면 접속 주소가 나온다.
 
     print('Connected by', addr)
@@ -365,7 +389,6 @@ def binder(client_socket, addr):
 
     while True:
         try:
-
             # receive 시작
             rdata = client_socket.recv(256)
             #print("receive : ", rdata.decode('utf8'), '\n')
@@ -374,8 +397,17 @@ def binder(client_socket, addr):
                 print("server 시작")
                 while True:
                     time.sleep(1)
+                    
+                    if win.isTimerRunning == False :
+                        print("매크로 작업 스탑! ( S )")
+                        MacroServer.commands = CommandSet()
+                        win.showNormal()
+                        client_socket.send('client off'.encode())
+                        is_client_running = False
+                        break
+                    
                     if len(MacroServer.commands._list) <= 0:
-                        print("명령어가 없네요")
+                        print("Server 루틴 종료")
                         MacroServer.commands = CommandSet()
                         break
                     c = MacroServer.commands._list.pop()
@@ -385,7 +417,9 @@ def binder(client_socket, addr):
 
                     # command set에 pause 명령어 들어온 경우
                     if isBreak:
+                        print("명령 권한 변경 Server -> client")
                         client_socket.send('client on'.encode())
+                        is_client_running = True
                         if len(MacroServer.commands._list) <= 0:
                             MacroServer.commands = CommandSet()
                         break
@@ -408,8 +442,17 @@ def binder(client_socket, addr):
         except OSError as os_error:
             win.stopLoadingAnimation(False)
             break
-
+        
+        if win.isTimerRunning == False and is_client_running == True:
+            print("매크로 작업 스탑! ( S )")
+            MacroServer.commands = CommandSet()
+            win.showNormal()
+            client_socket.send('client off'.encode())
+            is_client_running = False
+            
+                    
         time.sleep(2)
+        
 
 def SaveData():
     import os
