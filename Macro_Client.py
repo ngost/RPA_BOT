@@ -9,6 +9,7 @@ import threading, socket
 import pyautogui as pat
 import pyperclip
 import numpy as np
+from win32api import GetSystemMetrics
 
 global serverIP
 serverIP = "192.168.0.1"
@@ -20,12 +21,25 @@ class CommandSet:
     def __init__(self):
         # 명령어 입력 부분 (계산기 sample
         self._list = list()
+
+        #아즈텍 분석 Stop1 .. 1
         self._list.insert(0, Command("move", [1783, 1096]))
         self._list.insert(0, Command("lc"))
-        self._list.insert(0, Command("move", [1781, 1101]))
-        self._list.insert(0, Command("lc"))
+
+
+        # 아즈텍 분석 Stop 될때까지 Wait ..2
+# **** 활성화 필요        self._list.insert(0, Command("wait", [300]))
+
+        #아즈텍 분석 Stop2  .. 2
+        # self._list.insert(0, Command("move", [1783, 1096]))
+        # self._list.insert(0, Command("lc"))
+
+        #Server Pause .. 3
         self._list.insert(0, Command("pause"))
-        self._list.insert(0, Command("move", [1709, 1101],10))
+
+        #아즈텍 Resume (20초 딜레이) .. 7
+        self._list.insert(0, Command("wait", [20]))
+        self._list.insert(0, Command("move", [1709, 1101]))
         self._list.insert(0, Command("lc"))
 
 
@@ -34,7 +48,7 @@ class Command:
         # m : mouse command, h : keyboard commnad, k : keyboard typing, lc : click
         self._type = command_type
         self._data = command_data
-        self._delay_time = delay_time;
+        self._delay_time = delay_time
 
     def work(self):
         if self._type == "move":
@@ -63,6 +77,36 @@ class Command:
             return True
         elif self._type == "reset":
             commands = CommandSet()
+            return False
+        elif self._type == "wait":
+            time.sleep(self._data[0])
+            return False
+
+
+class CommandListWindow(QWidget):
+    """
+    This "window" is a QWidget. If it has no parent, it
+    will appear as a free-floating window as we want.
+    """
+    def __init__(self):
+        super().__init__()
+        layout = QVBoxLayout()
+        self.setStyleSheet("background-color: #888888;")
+        self.label = QLabel("명령어 리스트")
+        self.label.setStyleSheet("font-weight: bold;")
+        layout.addWidget(self.label)
+
+        i = len(win.commands._list)
+        for item in win.commands._list:
+            try:
+                label = QLabel(str(i)+" : " + str(item._type) + str(item._data))
+                layout.addWidget(label)
+            except Exception as e:
+                print(e)
+            i -= 1
+
+        self.resize(int(GetSystemMetrics(1)/3), int(GetSystemMetrics(1)/3))
+        self.setLayout(layout)
 
 
 class MacroClient(QWidget):
@@ -87,7 +131,7 @@ class MacroClient(QWidget):
         # 녹화 리스너
         self.setStyleSheet("background-color: #494949;")
         self.setWindowTitle("MacroClient")
-        self.resize(640, 320)
+        self.resize(int(GetSystemMetrics(0) / 3), int(GetSystemMetrics(1) / 3))
 
         # self.state_ = QLabel("상태")
         # self.state_.setAlignment(QtCore.Qt.AlignCenter)
@@ -113,6 +157,10 @@ class MacroClient(QWidget):
         self.state_msg.setAlignment(QtCore.Qt.AlignCenter)
         self.state_msg.setStyleSheet('QLabel { color : white;}')
 
+        #명렁어 도움말
+        self.help_icon = QPushButton("명령어")
+        self.help_icon.setStyleSheet('QPushButton::hover' '{' 'background-color : #666666' '}' 'QPushButton {background-color:#353535; color: white;}')
+        
         #label
         self.loading_label = QLabel()
         self.loading_label.setAlignment(QtCore.Qt.AlignCenter)
@@ -145,6 +193,8 @@ class MacroClient(QWidget):
         layout.setColumnStretch(3, 1)
         layout.setColumnStretch(4, 1)
 
+
+        layout.addWidget(self.help_icon, 0, 4)
         layout.addWidget(self.ip_title,0,1)
         layout.addWidget(self.port_title,0,3)
         layout.addWidget(self.ip_edit_text,1,1)
@@ -162,8 +212,11 @@ class MacroClient(QWidget):
 
         self.quit = QAction("quit", self)
         self.quit.triggered.connect(self.closeEvent)
+        self.help_icon.clicked.connect(self.showCommandList)
 
-
+    def showCommandList(self):
+        self.w = CommandListWindow()
+        self.w.show()
 
     def on_try_connection_click(self):
         if self.btn_conn.text() == "Stop Connecting":
@@ -372,6 +425,9 @@ def LoadData():
 
     try:
         # 불러올 datas
+        global serverIP # 전역 변수 사용할것이다 라는 뜻..
+        global serverPort # 전역 변수 사용할것이다 라는 뜻..
+
         win.ip_edit_text.setText(db['ip'])
         serverIP = db['ip']
         win.port_edit_text.setText(db['port'])
